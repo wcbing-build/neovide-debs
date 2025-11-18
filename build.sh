@@ -1,44 +1,74 @@
 #!/bin/sh
+set -e
 
-PACKAGE="neovide"
-REPO="neovide/neovide"
+# Check and extract version number
+[ $# != 1 ] && echo "Usage:  $0 <latest_releases_tag>" && exit 1
+VERSION=$(echo "$1" | sed -n 's|[^0-9]*\([^_]*\).*|\1|p') && test "$VERSION"
 
-VERSION="$(cat tag)"
+PACKAGE=neovide
+REPO=neovide/neovide
 
-ARCH="amd64"
-AMD64_FILENAME="neovide-linux-x86_64.tar.gz"
-ARM64_FILENAME=""
+ARCH_LIST="amd64"
+AMD64_FILENAME=neovide-linux-x86_64.tar.gz
 
-get_url_by_arch() {
-    case $1 in
-    "amd64") echo "https://github.com/$REPO/releases/latest/download/$AMD64_FILENAME" ;;
-    "arm64") echo "https://github.com/$REPO/releases/latest/download/$ARM64_FILENAME" ;;
-    esac
+prepare() {
+    mkdir -p output tmp
+    curl -fs "https://raw.githubusercontent.com/sigoden/dufs/refs/heads/main/CHANGELOG.md" | gzip > tmp/changelog.gz
+    curl -fsLo "tmp/$PACKAGE.png" https://github.com/neovide/neovide/raw/refs/heads/main/assets/neovide.svg
+    curl -fsLo "tmp/$PACKAGE.desktop" https://github.com/neovide/neovide/raw/refs/heads/main/assets/neovide.desktop
+    sed -i "s/Icon=neovide/Icon=$PACKAGE/" "tmp/$PACKAGE.desktop"
+    sed -i "s/Exec=neovide/Exec=$PACKAGE/" "tmp/$PACKAGE.desktop"
 }
 
 build() {
-    # Prepare
-    BASE_DIR="$PACKAGE"_"$VERSION"-1_"$1"
-    cp -r templates "$BASE_DIR"
-    sed -i "s/Architecture: arch/Architecture: $1/" "$BASE_DIR/DEBIAN/control"
-    sed -i "s/Version: version/Version: $VERSION-1/" "$BASE_DIR/DEBIAN/control"
+    BASE_DIR="$PACKAGE"_"$ARCH" && rm -rf "$BASE_DIR"
+    install -D templates/copyright -t "$BASE_DIR/usr/share/doc/$PACKAGE"
+    install -D tmp/changelog.gz -t "$BASE_DIR/usr/share/doc/$PACKAGE"
+
     # Download and move file
-    curl https://api.github.com/repos/$REPO/releases/latest | jq -r '.body' > $BASE_DIR/usr/share/doc/$PACKAGE/CHANGELOG.md
-    curl -Lo $BASE_DIR/usr/share/applications/neovide.desktop https://github.com/neovide/neovide/raw/refs/heads/main/assets/neovide.desktop
-    curl -Lo $BASE_DIR/usr/share/icons/hicolor/256x256/apps/neovide.png https://github.com/neovide/neovide/raw/main/assets/neovide-256x256.png
-    curl -sLo "$PACKAGE-$VERSION-$1.tar.gz" "$(get_url_by_arch $1)"
-    tar -xzf "$PACKAGE-$VERSION-$1.tar.gz"
-    mv "$PACKAGE" "$BASE_DIR/usr/bin/$PACKAGE"
-    chmod 755 "$BASE_DIR/usr/bin/$PACKAGE"
-    # Build
-    dpkg-deb --build --root-owner-group -Z xz "$BASE_DIR"
+    curl -fsLo "tmp/$PACKAGE-$ARCH.tar.gz" "$(get_url_by_arch "$ARCH")"
+    tar -xf "tmp/$PACKAGE-$ARCH.tar.gz"
+    install -D -m 755 -t "$BASE_DIR/usr/bin" neovide && rm neovide
+
+    install -D "tmp/$PACKAGE.desktop" -t "$BASE_DIR/usr/share/applications"
+    install -D "tmp/$PACKAGE.png" -t "$BASE_DIR/usr/share/icons/hicolor/scalable/apps"
+
+    # Package deb
+    mkdir -p "$BASE_DIR/DEBIAN"
+    SIZE=$(du -sk "$BASE_DIR"/usr | cut -f1)
+    echo "Package: $PACKAGE
+Version: $VERSION-1
+Architecture: $ARCH
+Installed-Size: $SIZE
+Maintainer: wcbing <i@wcbing.top>
+Section: editors
+Priority: optional
+Depends: neovim
+Homepage: https://github.com/$REPO
+Description: This is a simple graphical user interface for Neovim
+ (an aggressively refactored and updated Vim editor). 
+ Where possible there are some graphical improvements, but functionally
+ it should act like the terminal UI.
+ To checkout all the cool features, installation instructions,
+ configuration settings and much more, head on over to neovide.dev.
+" > "$BASE_DIR/DEBIAN/control"
+
+    dpkg-deb -b --root-owner-group -Z xz "$BASE_DIR" output
 }
 
-for i in $ARCH; do
-    echo "Building $i package..."
-    build "$i"
+get_url_by_arch() {
+    DOWNLOAD_PREFIX="https://github.com/$REPO/releases/latest/download"
+    case $1 in
+    "amd64") echo "$DOWNLOAD_PREFIX/$AMD64_FILENAME" ;;
+    esac
+}
+
+prepare
+
+for ARCH in $ARCH_LIST; do
+    echo "Building $ARCH package..."
+    build
 done
 
 # Create repo files
-apt-ftparchive packages . > Packages
-apt-ftparchive release . > Release
+cd output && apt-ftparchive packages . > Packages && apt-ftparchive release . > Release
