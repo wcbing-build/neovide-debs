@@ -1,0 +1,27 @@
+name: build and release by remote trigger
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version of Upstream Release'
+        required: true
+        type: string
+
+jobs:
+  build-release-by-remote-trigger:
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Build
+      run: ./build.sh $VERSION
+
+    - name: Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: v${{ env.VERSION }}
+        files: output/*

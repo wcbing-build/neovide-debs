@@ -3,19 +3,12 @@
 PACKAGE="neovide"
 REPO="neovide/neovide"
 
-VERSION="$(cat tag)"
+# Processing again to avoid errors of remote incoming 
+VERSION=$(echo $1 | sed -n 's|[^0-9]*\([^_]*\).*|\1|p')
 
 ARCH="amd64"
 AMD64_FILENAME="neovide-linux-x86_64.tar.gz"
 ARM64_FILENAME=""
-
-get_url_by_arch() {
-    case $1 in
-    "amd64") echo "https://github.com/$REPO/releases/latest/download/$AMD64_FILENAME" ;;
-    "arm64") echo "https://github.com/$REPO/releases/latest/download/$ARM64_FILENAME" ;;
-    esac
-}
-
 build() {
     # Prepare
     BASE_DIR="$PACKAGE"_"$VERSION"-1_"$1"
@@ -31,8 +24,17 @@ build() {
     mv "$PACKAGE" "$BASE_DIR/usr/bin/$PACKAGE"
     chmod 755 "$BASE_DIR/usr/bin/$PACKAGE"
     # Build
-    dpkg-deb --build --root-owner-group -Z xz "$BASE_DIR"
+    dpkg-deb -b --root-owner-group -Z xz "$BASE_DIR" output
 }
+
+get_url_by_arch() {
+    case $1 in
+    "amd64") echo "https://github.com/$REPO/releases/latest/download/$AMD64_FILENAME" ;;
+    "arm64") echo "https://github.com/$REPO/releases/latest/download/$ARM64_FILENAME" ;;
+    esac
+}
+
+mkdir output
 
 for i in $ARCH; do
     echo "Building $i package..."
@@ -40,5 +42,6 @@ for i in $ARCH; do
 done
 
 # Create repo files
+cd output
 apt-ftparchive packages . > Packages
 apt-ftparchive release . > Release
